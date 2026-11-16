@@ -3,6 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="referrer" content="strict-origin-when-cross-origin">
 <title>YouTube Watch Wall (1000)</title>
 <style>
   :root { --bg:#0f0f12; --panel:#1a1a20; --text:#eee; --muted:#9a9aa5; --accent:#ff2d2d; }
@@ -32,12 +33,19 @@
   .tile .play::after { content:""; position:absolute; left:17px; top:8px; border-left:14px solid #fff; border-top:7px solid transparent; border-bottom:7px solid transparent; }
   .tile .num { position:absolute; top:4px; left:6px; font-size:11px; background:rgba(0,0,0,.6); padding:1px 6px; border-radius:10px; pointer-events:none; z-index:2; }
   .tile .views { position:absolute; left:6px; bottom:6px; z-index:2; font-size:12px; background:rgba(0,0,0,.72); padding:2px 8px; border-radius:10px; pointer-events:none; }
+  .tile .views[hidden] { display:none; }
   .tile.viewed { box-shadow: 0 0 0 2px #2ecc71; }
   .tile.viewed img { opacity:.6; }
   .tile .vbadge { position:absolute; right:6px; bottom:6px; z-index:2; font-size:11px; font-weight:700; color:#06240f; background:#2ecc71; padding:2px 8px; border-radius:10px; pointer-events:none; }
   .tile .cbadge { position:absolute; left:6px; top:26px; z-index:2; font-size:12px; background:rgba(0,0,0,.72); padding:1px 7px; border-radius:10px; pointer-events:none; }
-  .tile .cool { position:absolute; top:4px; right:62px; z-index:2; background:rgba(0,0,0,.7); border:0; color:#fff; padding:1px 7px; border-radius:10px; font-size:12px; display:none; cursor:pointer; }
-  .tile:hover .cool { display:block; }
+  .tile .tbtn { position:absolute; top:4px; z-index:3; background:rgba(0,0,0,.7); border:0; color:#fff; padding:1px 7px; border-radius:10px; font-size:12px; display:none; cursor:pointer; text-decoration:none; line-height:1.5; }
+  .tile .x { right:6px; }
+  .tile .sh { right:34px; }
+  .tile .cool { right:62px; }
+  .tile .yt { right:92px; }
+  .tile:hover .tbtn { display:block; }
+  /* touch screens have no hover, so always show the small buttons there */
+  @media (hover:none) { .tile .tbtn { display:block; } }
   button.sub { background:#cc0000; border-color:#cc0000; color:#fff; font-weight:700; }
   button.sub:hover { background:#ff0000; border-color:#ff0000; }
   #sharebar { display:flex; flex-wrap:wrap; gap:8px; align-items:center; padding:10px 16px; background:var(--panel); border-bottom:1px solid #2a2a33; }
@@ -48,11 +56,9 @@
   .sbtn.wa { background:#25d366; } .sbtn.x { background:#000; border:1px solid #444; } .sbtn.fb { background:#1877f2; }
   .sbtn.tg { background:#27a7e7; } .sbtn.cp { background:#444; } .sbtn.nt { background:var(--accent); }
   .sbtn:hover { filter:brightness(1.15); border:0; }
-  .tile .sh { position:absolute; top:4px; right:34px; z-index:2; background:rgba(0,0,0,.7); border:0; color:#fff; padding:1px 7px; border-radius:10px; font-size:12px; display:none; cursor:pointer; }
-  .tile:hover .sh { display:block; }
-  .tile .x { position:absolute; top:4px; right:6px; z-index:2; background:rgba(0,0,0,.7); border:0; color:#fff; padding:1px 7px; border-radius:10px; font-size:12px; display:none; }
-  .tile:hover .x { display:block; }
   .tile iframe { width:100%; height:100%; border:0; display:block; }
+  #fileWarn { background:#3a1f1f; color:#ffd2d2; padding:10px 16px; font-size:13px; border-bottom:1px solid #5a2a2a; }
+  #fileWarn code { background:#00000055; padding:1px 5px; border-radius:4px; }
   @media (max-width:700px){ #wall{ grid-template-columns:repeat(2,1fr); } #cols-wrap{display:none;} }
 </style>
 </head>
@@ -96,10 +102,12 @@ const KEY = "watchwall.v2";
 const wall = document.getElementById("wall");
 const msg = document.getElementById("msg");
 
-// slots[i] = video ID or null. One link per tile, no repeats.
+function esc(s){ return String(s == null ? "" : s).replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;").replace(/"/g,"&quot;"); }
+
+// slots[i] = video ID or null. One link per tile, no repeats (except "Post to all").
 let slots = load();
 
-// Per-tile flags (by tile number): viewed = you played it on this wall, cool = you marked it with a 😎 sign
+// Per-tile flags (by tile index): viewed = played on this wall, cool = marked with 😎
 const FLAGS_KEY = "watchwall.flags.v1";
 let flags = (function(){
   try { const f = JSON.parse(localStorage.getItem(FLAGS_KEY)); if (f && f.viewed && f.cool) return f; } catch(e){}
@@ -127,8 +135,8 @@ function load(){
   try {
     const v = JSON.parse(localStorage.getItem(KEY));
     if (Array.isArray(v)) {
-      // keep links saved from the older 100-tile wall; just add empty tiles up to TOTAL
-      const out = v.slice(0, TOTAL);
+      // keep only valid 11-character IDs; pad with empty tiles up to TOTAL
+      const out = v.slice(0, TOTAL).map(x => (typeof x === "string" && /^[\w-]{11}$/.test(x)) ? x : null);
       while (out.length < TOTAL) out.push(null);
       return out;
     }
@@ -140,10 +148,10 @@ function store(){ try { localStorage.setItem(KEY, JSON.stringify(slots)); } catc
 function extractId(s){
   s = (s || "").trim();
   if (/^[\w-]{11}$/.test(s)) return s;
-  const m = s.match(/(?:v=|youtu\.be\/|shorts\/|embed\/|live\/)([\w-]{11})/);
+  const m = s.match(/(?:[?&]v=|youtu\.be\/|shorts\/|embed\/|live\/|v\/)([\w-]{11})(?![\w-])/);
   return m ? m[1] : null;
 }
-function say(t){ msg.textContent = t || ""; if (t) setTimeout(() => { if (msg.textContent === t) msg.textContent = ""; }, 3500); }
+function say(t){ msg.textContent = t || ""; if (t) setTimeout(() => { if (msg.textContent === t) msg.textContent = ""; }, 4500); }
 
 function addToSlot(index, raw){
   const id = extractId(raw);
@@ -153,29 +161,36 @@ function addToSlot(index, raw){
 }
 
 function playTile(tile, mute){
+  if (tile.querySelector("iframe")) return;
   const id = tile.dataset.id;
   markViewed(Number(tile.dataset.n) - 1);
   tile.querySelector(".thumb")?.remove();
   tile.querySelector(".play")?.remove();
+  // origin helps YouTube accept the embed; only added when the page has a real web address
+  const origin = (location.protocol === "http:" || location.protocol === "https:") ? "&origin=" + encodeURIComponent(location.origin) : "";
   tile.insertAdjacentHTML("afterbegin",
-    '<iframe src="https://www.youtube.com/embed/'+id+'?autoplay=1&rel=0&playsinline=1'+(mute?'&mute=1':'')+'" referrerpolicy="strict-origin-when-cross-origin" allow="autoplay; encrypted-media; picture-in-picture; fullscreen" allowfullscreen></iframe>');
+    '<iframe src="https://www.youtube.com/embed/' + id + '?autoplay=1&rel=0&playsinline=1' + (mute ? '&mute=1' : '') + origin + '" referrerpolicy="strict-origin-when-cross-origin" allow="autoplay; encrypted-media; picture-in-picture; fullscreen" allowfullscreen></iframe>');
 }
 
 function render(){
   wall.innerHTML = "";
-  let filled = 0;
+  const frag = document.createDocumentFragment();
   slots.forEach((id, i) => {
     const t = document.createElement("div");
     t.dataset.n = i + 1;
     if (id) {
-      filled++;
       t.className = "tile" + (flags.viewed[i] ? " viewed" : ""); t.dataset.id = id;
       t.innerHTML =
-        '<img class="thumb" loading="lazy" src="https://i.ytimg.com/vi/'+id+'/mqdefault.jpg" alt="Video '+(i+1)+'">' +
-        '<div class="play"></div><div class="num">'+(i+1)+'</div><button class="sh" title="Share this video">⤴</button><button class="cool" title="Mark as cool">😎</button><button class="x" title="Remove">✕</button>' +
+        '<img class="thumb" loading="lazy" src="https://i.ytimg.com/vi/' + id + '/mqdefault.jpg" alt="Video ' + (i + 1) + '">' +
+        '<div class="play"></div><div class="num">' + (i + 1) + '</div>' +
+        '<a class="tbtn yt" href="https://www.youtube.com/watch?v=' + id + '" target="_blank" rel="noopener" title="Open on YouTube (use this if the video won\'t play here)">↗ YT</a>' +
+        '<button class="tbtn cool" title="Mark as cool">😎</button>' +
+        '<button class="tbtn sh" title="Share this video">⤴</button>' +
+        '<button class="tbtn x" title="Remove">✕</button>' +
         (flags.cool[i] ? '<div class="cbadge">😎 Cool</div>' : '') +
         (flags.viewed[i] ? '<div class="vbadge">✓ Viewed</div>' : '') +
-        '<div class="views" data-id="'+id+'" '+(stats[id] ? '' : 'hidden')+'>'+viewsText(id)+'</div>';
+        '<div class="views" data-id="' + id + '" ' + (stats[id] ? '' : 'hidden') + '>' + esc(viewsText(id)) + '</div>';
+      if (stats[id] && stats[id].title) t.title = stats[id].title;
       t.querySelector(".thumb").onclick = () => playTile(t, false);
       t.querySelector(".sh").onclick = (e) => {
         e.stopPropagation();
@@ -196,13 +211,14 @@ function render(){
       t.querySelector(".x").onclick = (e) => { e.stopPropagation(); slots[i] = null; delete flags.viewed[i]; delete flags.cool[i]; saveFlags(); store(); render(); };
     } else {
       t.className = "tile empty";
-      t.innerHTML = '<div class="plus">#'+(i+1)+' · add link</div><input type="text" placeholder="Paste link, Enter">';
+      t.innerHTML = '<div class="plus">#' + (i + 1) + ' · add link</div><input type="text" placeholder="Paste link, Enter">';
       const inp = t.querySelector("input");
       inp.addEventListener("keydown", e => { if (e.key === "Enter") addToSlot(i, inp.value); });
       inp.addEventListener("paste", () => setTimeout(() => { if (extractId(inp.value)) addToSlot(i, inp.value); }, 0));
     }
-    wall.appendChild(t);
+    frag.appendChild(t);
   });
+  wall.appendChild(frag);
   updateCount();
   refreshShareList();
   fetchStats(false);
@@ -218,7 +234,7 @@ function refreshShareList(){
     if (!id || seen.has(id)) return;
     seen.add(id);
     const label = (stats[id] && stats[id].title) ? stats[id].title : ("Video #" + (i + 1) + " (" + id + ")");
-    html += '<option value="' + id + '">' + label.replace(/</g, "&lt;") + '</option>';
+    html += '<option value="' + id + '">' + esc(label) + '</option>';
   });
   shareSel.innerHTML = html;
   shareSel.value = [...shareSel.options].some(o => o.value === prev) ? prev : "wall";
@@ -261,7 +277,9 @@ if (!navigator.share) document.getElementById("nativeShare").style.display = "no
 
 // ---------- View counts (YouTube Data API v3) ----------
 const API_KEY_STORE = "watchwall.apikey";
-let stats = {}; // id -> { views, title }
+let stats = {};            // id -> { views, title, channelId }
+const missing = new Set(); // ids the API did not return (private/deleted), so we don't ask again and again
+let apiBlocked = false;    // set after a quota / invalid-key error so we stop hammering the API
 function getKey(){ try { return localStorage.getItem(API_KEY_STORE) || ""; } catch(e){ return ""; } }
 function viewsText(id){
   const s = stats[id];
@@ -272,14 +290,14 @@ function viewsText(id){
 function paintViews(){
   wall.querySelectorAll(".views").forEach(el => {
     const id = el.dataset.id;
-    if (stats[id]) { el.textContent = viewsText(id); el.hidden = false; el.parentElement.title = stats[id].title || ""; }
+    if (stats[id]) { el.textContent = viewsText(id); el.hidden = false; if (el.parentElement) el.parentElement.title = stats[id].title || ""; }
   });
 }
 let fetching = false;
 async function fetchStats(force){
   const key = getKey();
-  if (!key || fetching) return;
-  const unique = [...new Set(slots.filter(Boolean))].filter(id => force || !stats[id]);
+  if (!key || fetching || apiBlocked) return;
+  const unique = [...new Set(slots.filter(Boolean))].filter(id => force ? !missing.has(id) : (!stats[id] && !missing.has(id)));
   if (!unique.length) return;
   fetching = true;
   try {
@@ -288,10 +306,18 @@ async function fetchStats(force){
       const url = "https://www.googleapis.com/youtube/v3/videos?part=statistics,snippet&id=" + chunk.join(",") + "&key=" + encodeURIComponent(key);
       const res = await fetch(url);
       const data = await res.json();
-      if (data.error) { say("API error: " + (data.error.message || data.error.code)); break; }
+      if (data.error) {
+        const reason = data.error.errors && data.error.errors[0] && data.error.errors[0].reason;
+        if (reason === "quotaExceeded" || reason === "keyInvalid" || reason === "forbidden" || reason === "accessNotConfigured" || res.status === 400 || res.status === 403) apiBlocked = true;
+        say("API error: " + (data.error.message || data.error.code) + (apiBlocked ? " (view counts paused, click ↻ Views to retry)" : ""));
+        break;
+      }
+      const returned = new Set();
       (data.items || []).forEach(v => {
+        returned.add(v.id);
         stats[v.id] = { views: v.statistics && v.statistics.viewCount != null ? Number(v.statistics.viewCount) : null, title: v.snippet && v.snippet.title, channelId: v.snippet && v.snippet.channelId };
       });
+      chunk.forEach(id => { if (!returned.has(id)) missing.add(id); });
       // If no channel was set yet, use the channel of the first video on the wall
       if (!getChannel()) {
         const first = slots.find(Boolean);
@@ -304,6 +330,7 @@ async function fetchStats(force){
     say("Couldn't reach the YouTube API. Check your connection and key.");
   } finally { fetching = false; }
 }
+
 // ---------- Subscribe button ----------
 const CH_STORE = "watchwall.channel";
 function getChannel(){ try { return localStorage.getItem(CH_STORE) || ""; } catch(e){ return ""; } }
@@ -340,14 +367,16 @@ document.getElementById("apiKey").onclick = () => {
   const k = prompt("Paste your YouTube Data API v3 key (leave empty to remove it):", getKey());
   if (k === null) return;
   try { k.trim() ? localStorage.setItem(API_KEY_STORE, k.trim()) : localStorage.removeItem(API_KEY_STORE); } catch(e){}
-  stats = {}; render();
+  stats = {}; missing.clear(); apiBlocked = false; render();
   say(k.trim() ? "Key saved. Loading view counts…" : "Key removed.");
 };
 document.getElementById("refresh").onclick = () => {
   if (!getKey()) { say("Add your API key first (API key button)."); return; }
+  apiBlocked = false; missing.clear();
   fetchStats(true);
 };
-setInterval(() => fetchStats(true), 60000); // live-ish update every minute
+// Refresh every 10 minutes. (Every minute for 1000 videos burns through the free daily API quota and causes errors.)
+setInterval(() => fetchStats(true), 10 * 60 * 1000);
 
 // Top bar: adds the link into the next empty tile
 function addNext(){
@@ -360,18 +389,20 @@ function fillAll(){
   const inp = document.getElementById("link");
   const id = extractId(inp.value);
   if (!id) { say("Paste a valid YouTube link first."); return; }
+  if (slots.some(Boolean) && !confirm("This replaces everything on the wall with this one video. Continue?")) return;
   slots = new Array(TOTAL).fill(id); flags = { viewed: {}, cool: {} }; saveFlags(); store(); render(); inp.value = "";
   say("Posted to all " + TOTAL + " tiles.");
 }
 document.getElementById("fillAll").onclick = fillAll;
 document.getElementById("add").onclick = addNext;
 
-// YouTube blocks embeds with "player configuration error" (153) when the page has no web address
+// YouTube blocks embeds with "Error 153: video player configuration error" when the page has no web address
 if (location.protocol === "file:") {
   const b = document.createElement("div");
-  b.style.cssText = "background:#3a1f1f;color:#ffd2d2;padding:10px 16px;font-size:13px;border-bottom:1px solid #5a2a2a;";
-  b.innerHTML = "⚠ You opened this file directly from your computer. YouTube will show <b>“Video player configuration error”</b> in that case. " +
-    "Run it from a web address instead: host it free (Netlify Drop, GitHub Pages, Cloudflare Pages) or run <code>python -m http.server</code> in this folder and open <code>http://localhost:8000/youtube-watch-wall.html</code>.";
+  b.id = "fileWarn";
+  b.innerHTML = "⚠ You opened this file directly from your computer (file://). YouTube then refuses to play videos and shows <b>“Error 153 / Video player configuration error”</b>. " +
+    "Fix: open it from a web address instead. Host it free (Netlify Drop, GitHub Pages, Cloudflare Pages), or run <code>python -m http.server</code> in this folder and open <code>http://localhost:8000/youtube-watch-wall.html</code>. " +
+    "Meanwhile, hover a tile and click <b>↗ YT</b> to open the video on YouTube.";
   document.body.insertBefore(b, document.querySelector("header"));
 }
 document.getElementById("link").addEventListener("keydown", e => { if (e.key === "Enter") addNext(); });
