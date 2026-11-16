@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>YouTube Watch Wall (100)</title>
+<title>YouTube Watch Wall (1000)</title>
 <style>
   :root { --bg:#0f0f12; --panel:#1a1a20; --text:#eee; --muted:#9a9aa5; --accent:#ff2d2d; }
   * { box-sizing: border-box; }
@@ -56,14 +56,14 @@
   <div id="addbar">
     <input id="link" type="text" placeholder="Paste one YouTube link and press Enter">
     <button id="add" class="primary">Add</button>
-    <button id="fillAll" class="primary" title="Show this one link on all 100 tiles">Post to all 100</button>
+    <button id="fillAll" class="primary" title="Show this one link on all 1000 tiles">Post to all 1000</button>
   </div>
   <span id="count"></span>
   <button id="subscribe" class="sub" title="Subscribe to the channel on YouTube">▶ Subscribe</button>
   <button id="setChannel" title="Set your channel link, @handle or channel ID">Set channel</button>
   <button id="apiKey" title="YouTube Data API v3 key, used to show view counts">API key</button>
   <button id="refresh" title="Refresh view counts">↻ Views</button>
-  <button id="playAll">Play all (muted)</button>
+  <button id="playAll" title="Plays the videos currently on screen (max 30), muted">Play visible (muted)</button>
   <button id="stopAll">Stop all</button>
   <button id="clearAll">Clear wall</button>
   <label id="cols-wrap">Columns <input id="cols" type="range" min="2" max="10" value="5"> <span id="colsVal">5</span></label>
@@ -84,7 +84,7 @@
 <main id="wall"></main>
 
 <script>
-const TOTAL = 100;
+const TOTAL = 1000;
 const KEY = "watchwall.v2";
 const wall = document.getElementById("wall");
 const msg = document.getElementById("msg");
@@ -95,7 +95,12 @@ let slots = load();
 function load(){
   try {
     const v = JSON.parse(localStorage.getItem(KEY));
-    if (Array.isArray(v) && v.length === TOTAL) return v;
+    if (Array.isArray(v)) {
+      // keep links saved from the older 100-tile wall; just add empty tiles up to TOTAL
+      const out = v.slice(0, TOTAL);
+      while (out.length < TOTAL) out.push(null);
+      return out;
+    }
   } catch(e){}
   return new Array(TOTAL).fill(null);
 }
@@ -305,7 +310,7 @@ setInterval(() => fetchStats(true), 60000); // live-ish update every minute
 function addNext(){
   const inp = document.getElementById("link");
   const idx = slots.indexOf(null);
-  if (idx === -1) { say("The wall is full (100)."); return; }
+  if (idx === -1) { say("The wall is full (" + TOTAL + ")."); return; }
   if (addToSlot(idx, inp.value)) { inp.value = ""; inp.focus(); }
 }
 function fillAll(){
@@ -313,7 +318,7 @@ function fillAll(){
   const id = extractId(inp.value);
   if (!id) { say("Paste a valid YouTube link first."); return; }
   slots = new Array(TOTAL).fill(id); store(); render(); inp.value = "";
-  say("Posted to all 100 tiles.");
+  say("Posted to all " + TOTAL + " tiles.");
 }
 document.getElementById("fillAll").onclick = fillAll;
 document.getElementById("add").onclick = addNext;
@@ -331,8 +336,14 @@ document.getElementById("link").addEventListener("keydown", e => { if (e.key ===
 document.getElementById("playAll").onclick = () => {
   const n = slots.filter(Boolean).length;
   if (!n) { say("Add some videos first."); return; }
-  if (n > 12 && !confirm("Loading " + n + " players at once is heavy and may slow your browser. Continue?")) return;
-  wall.querySelectorAll(".tile[data-id]").forEach(t => { if (!t.querySelector("iframe")) playTile(t, true); });
+  // With up to 1000 tiles, only the tiles currently on screen are started (max 30) so the browser doesn't freeze.
+  const vh = window.innerHeight, MAX = 30;
+  const visible = [...wall.querySelectorAll(".tile[data-id]")].filter(t => {
+    const r = t.getBoundingClientRect(); return r.bottom > 0 && r.top < vh && !t.querySelector("iframe");
+  }).slice(0, MAX);
+  if (!visible.length) { say("No unplayed videos on screen. Scroll to some tiles first."); return; }
+  visible.forEach(t => playTile(t, true));
+  say("Started " + visible.length + " videos that are on screen.");
 };
 document.getElementById("stopAll").onclick = render;
 document.getElementById("clearAll").onclick = () => {
