@@ -32,6 +32,12 @@
   .tile .play::after { content:""; position:absolute; left:17px; top:8px; border-left:14px solid #fff; border-top:7px solid transparent; border-bottom:7px solid transparent; }
   .tile .num { position:absolute; top:4px; left:6px; font-size:11px; background:rgba(0,0,0,.6); padding:1px 6px; border-radius:10px; pointer-events:none; z-index:2; }
   .tile .views { position:absolute; left:6px; bottom:6px; z-index:2; font-size:12px; background:rgba(0,0,0,.72); padding:2px 8px; border-radius:10px; pointer-events:none; }
+  .tile.viewed { box-shadow: 0 0 0 2px #2ecc71; }
+  .tile.viewed img { opacity:.6; }
+  .tile .vbadge { position:absolute; right:6px; bottom:6px; z-index:2; font-size:11px; font-weight:700; color:#06240f; background:#2ecc71; padding:2px 8px; border-radius:10px; pointer-events:none; }
+  .tile .cbadge { position:absolute; left:6px; top:26px; z-index:2; font-size:12px; background:rgba(0,0,0,.72); padding:1px 7px; border-radius:10px; pointer-events:none; }
+  .tile .cool { position:absolute; top:4px; right:62px; z-index:2; background:rgba(0,0,0,.7); border:0; color:#fff; padding:1px 7px; border-radius:10px; font-size:12px; display:none; cursor:pointer; }
+  .tile:hover .cool { display:block; }
   button.sub { background:#cc0000; border-color:#cc0000; color:#fff; font-weight:700; }
   button.sub:hover { background:#ff0000; border-color:#ff0000; }
   #sharebar { display:flex; flex-wrap:wrap; gap:8px; align-items:center; padding:10px 16px; background:var(--panel); border-bottom:1px solid #2a2a33; }
@@ -65,6 +71,7 @@
   <button id="refresh" title="Refresh view counts">↻ Views</button>
   <button id="playAll" title="Plays the videos currently on screen (max 30), muted">Play visible (muted)</button>
   <button id="stopAll">Stop all</button>
+  <button id="resetViewed" title="Clear all Viewed marks">Reset viewed</button>
   <button id="clearAll">Clear wall</button>
   <label id="cols-wrap">Columns <input id="cols" type="range" min="2" max="10" value="5"> <span id="colsVal">5</span></label>
   <div id="msg"></div>
@@ -91,6 +98,30 @@ const msg = document.getElementById("msg");
 
 // slots[i] = video ID or null. One link per tile, no repeats.
 let slots = load();
+
+// Per-tile flags (by tile number): viewed = you played it on this wall, cool = you marked it with a 😎 sign
+const FLAGS_KEY = "watchwall.flags.v1";
+let flags = (function(){
+  try { const f = JSON.parse(localStorage.getItem(FLAGS_KEY)); if (f && f.viewed && f.cool) return f; } catch(e){}
+  return { viewed: {}, cool: {} };
+})();
+function saveFlags(){ try { localStorage.setItem(FLAGS_KEY, JSON.stringify(flags)); } catch(e){} }
+function updateCount(){
+  const filled = slots.filter(Boolean).length;
+  const v = Object.keys(flags.viewed).filter(i => slots[i]).length;
+  const c = Object.keys(flags.cool).filter(i => slots[i]).length;
+  document.getElementById("count").textContent = filled + " / " + TOTAL + "  ·  ✓ " + v + " viewed  ·  😎 " + c;
+}
+function markViewed(i){
+  if (flags.viewed[i]) return;
+  flags.viewed[i] = true; saveFlags();
+  const t = wall.children[i];
+  if (t && t.classList.contains("tile") && !t.querySelector(".vbadge")) {
+    t.classList.add("viewed");
+    t.insertAdjacentHTML("beforeend", '<div class="vbadge">✓ Viewed</div>');
+  }
+  updateCount();
+}
 
 function load(){
   try {
@@ -123,6 +154,7 @@ function addToSlot(index, raw){
 
 function playTile(tile, mute){
   const id = tile.dataset.id;
+  markViewed(Number(tile.dataset.n) - 1);
   tile.querySelector(".thumb")?.remove();
   tile.querySelector(".play")?.remove();
   tile.insertAdjacentHTML("afterbegin",
@@ -137,10 +169,12 @@ function render(){
     t.dataset.n = i + 1;
     if (id) {
       filled++;
-      t.className = "tile"; t.dataset.id = id;
+      t.className = "tile" + (flags.viewed[i] ? " viewed" : ""); t.dataset.id = id;
       t.innerHTML =
         '<img class="thumb" loading="lazy" src="https://i.ytimg.com/vi/'+id+'/mqdefault.jpg" alt="Video '+(i+1)+'">' +
-        '<div class="play"></div><div class="num">'+(i+1)+'</div><button class="sh" title="Share this video">⤴</button><button class="x" title="Remove">✕</button>' +
+        '<div class="play"></div><div class="num">'+(i+1)+'</div><button class="sh" title="Share this video">⤴</button><button class="cool" title="Mark as cool">😎</button><button class="x" title="Remove">✕</button>' +
+        (flags.cool[i] ? '<div class="cbadge">😎 Cool</div>' : '') +
+        (flags.viewed[i] ? '<div class="vbadge">✓ Viewed</div>' : '') +
         '<div class="views" data-id="'+id+'" '+(stats[id] ? '' : 'hidden')+'>'+viewsText(id)+'</div>';
       t.querySelector(".thumb").onclick = () => playTile(t, false);
       t.querySelector(".sh").onclick = (e) => {
@@ -150,7 +184,16 @@ function render(){
         const bar = document.getElementById("sharebar");
         bar.classList.add("flash"); setTimeout(() => bar.classList.remove("flash"), 1200);
       };
-      t.querySelector(".x").onclick = (e) => { e.stopPropagation(); slots[i] = null; store(); render(); };
+      t.querySelector(".cool").onclick = (e) => {
+        e.stopPropagation();
+        if (flags.cool[i]) delete flags.cool[i]; else flags.cool[i] = true;
+        saveFlags();
+        const badge = t.querySelector(".cbadge");
+        if (flags.cool[i] && !badge) t.insertAdjacentHTML("beforeend", '<div class="cbadge">😎 Cool</div>');
+        else if (!flags.cool[i] && badge) badge.remove();
+        updateCount();
+      };
+      t.querySelector(".x").onclick = (e) => { e.stopPropagation(); slots[i] = null; delete flags.viewed[i]; delete flags.cool[i]; saveFlags(); store(); render(); };
     } else {
       t.className = "tile empty";
       t.innerHTML = '<div class="plus">#'+(i+1)+' · add link</div><input type="text" placeholder="Paste link, Enter">';
@@ -160,7 +203,7 @@ function render(){
     }
     wall.appendChild(t);
   });
-  document.getElementById("count").textContent = filled + " / " + TOTAL;
+  updateCount();
   refreshShareList();
   fetchStats(false);
 }
@@ -317,7 +360,7 @@ function fillAll(){
   const inp = document.getElementById("link");
   const id = extractId(inp.value);
   if (!id) { say("Paste a valid YouTube link first."); return; }
-  slots = new Array(TOTAL).fill(id); store(); render(); inp.value = "";
+  slots = new Array(TOTAL).fill(id); flags = { viewed: {}, cool: {} }; saveFlags(); store(); render(); inp.value = "";
   say("Posted to all " + TOTAL + " tiles.");
 }
 document.getElementById("fillAll").onclick = fillAll;
@@ -347,7 +390,11 @@ document.getElementById("playAll").onclick = () => {
 };
 document.getElementById("stopAll").onclick = render;
 document.getElementById("clearAll").onclick = () => {
-  if (confirm("Remove all videos from the wall?")) { slots = new Array(TOTAL).fill(null); store(); render(); }
+  if (confirm("Remove all videos from the wall?")) { slots = new Array(TOTAL).fill(null); flags = { viewed: {}, cool: {} }; saveFlags(); store(); render(); }
+};
+document.getElementById("resetViewed").onclick = () => {
+  if (!confirm("Clear all ✓ Viewed marks? Your 😎 Cool signs stay.")) return;
+  flags.viewed = {}; saveFlags(); render(); say("Viewed marks cleared.");
 };
 
 const cols = document.getElementById("cols"), colsVal = document.getElementById("colsVal");
