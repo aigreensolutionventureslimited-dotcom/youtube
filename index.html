@@ -32,6 +32,18 @@
   .tile .play::after { content:""; position:absolute; left:17px; top:8px; border-left:14px solid #fff; border-top:7px solid transparent; border-bottom:7px solid transparent; }
   .tile .num { position:absolute; top:4px; left:6px; font-size:11px; background:rgba(0,0,0,.6); padding:1px 6px; border-radius:10px; pointer-events:none; z-index:2; }
   .tile .views { position:absolute; left:6px; bottom:6px; z-index:2; font-size:12px; background:rgba(0,0,0,.72); padding:2px 8px; border-radius:10px; pointer-events:none; }
+  button.sub { background:#cc0000; border-color:#cc0000; color:#fff; font-weight:700; }
+  button.sub:hover { background:#ff0000; border-color:#ff0000; }
+  #sharebar { display:flex; flex-wrap:wrap; gap:8px; align-items:center; padding:10px 16px; background:var(--panel); border-bottom:1px solid #2a2a33; }
+  #sharebar.flash { box-shadow: inset 0 0 0 2px var(--accent); }
+  #sharebar .lbl { font-size:13px; color:var(--muted); }
+  #sharebar select { background:#0f0f12; color:var(--text); border:1px solid #33333d; border-radius:8px; padding:8px 10px; font-size:14px; max-width:280px; }
+  .sbtn { color:#fff; border:0; font-weight:600; }
+  .sbtn.wa { background:#25d366; } .sbtn.x { background:#000; border:1px solid #444; } .sbtn.fb { background:#1877f2; }
+  .sbtn.tg { background:#27a7e7; } .sbtn.cp { background:#444; } .sbtn.nt { background:var(--accent); }
+  .sbtn:hover { filter:brightness(1.15); border:0; }
+  .tile .sh { position:absolute; top:4px; right:34px; z-index:2; background:rgba(0,0,0,.7); border:0; color:#fff; padding:1px 7px; border-radius:10px; font-size:12px; display:none; cursor:pointer; }
+  .tile:hover .sh { display:block; }
   .tile .x { position:absolute; top:4px; right:6px; z-index:2; background:rgba(0,0,0,.7); border:0; color:#fff; padding:1px 7px; border-radius:10px; font-size:12px; display:none; }
   .tile:hover .x { display:block; }
   .tile iframe { width:100%; height:100%; border:0; display:block; }
@@ -47,6 +59,8 @@
     <button id="fillAll" class="primary" title="Show this one link on all 100 tiles">Post to all 100</button>
   </div>
   <span id="count"></span>
+  <button id="subscribe" class="sub" title="Subscribe to the channel on YouTube">▶ Subscribe</button>
+  <button id="setChannel" title="Set your channel link, @handle or channel ID">Set channel</button>
   <button id="apiKey" title="YouTube Data API v3 key, used to show view counts">API key</button>
   <button id="refresh" title="Refresh view counts">↻ Views</button>
   <button id="playAll">Play all (muted)</button>
@@ -55,6 +69,17 @@
   <label id="cols-wrap">Columns <input id="cols" type="range" min="2" max="10" value="5"> <span id="colsVal">5</span></label>
   <div id="msg"></div>
 </header>
+
+<div id="sharebar">
+  <span class="lbl">Share:</span>
+  <select id="shareWhat"><option value="wall">This wall page</option></select>
+  <button class="sbtn wa" data-s="wa">WhatsApp</button>
+  <button class="sbtn x" data-s="x">X</button>
+  <button class="sbtn fb" data-s="fb">Facebook</button>
+  <button class="sbtn tg" data-s="tg">Telegram</button>
+  <button class="sbtn cp" data-s="cp">Copy link</button>
+  <button class="sbtn nt" data-s="nt" id="nativeShare">Share…</button>
+</div>
 
 <main id="wall"></main>
 
@@ -110,9 +135,16 @@ function render(){
       t.className = "tile"; t.dataset.id = id;
       t.innerHTML =
         '<img class="thumb" loading="lazy" src="https://i.ytimg.com/vi/'+id+'/mqdefault.jpg" alt="Video '+(i+1)+'">' +
-        '<div class="play"></div><div class="num">'+(i+1)+'</div><button class="x" title="Remove">✕</button>' +
+        '<div class="play"></div><div class="num">'+(i+1)+'</div><button class="sh" title="Share this video">⤴</button><button class="x" title="Remove">✕</button>' +
         '<div class="views" data-id="'+id+'" '+(stats[id] ? '' : 'hidden')+'>'+viewsText(id)+'</div>';
       t.querySelector(".thumb").onclick = () => playTile(t, false);
+      t.querySelector(".sh").onclick = (e) => {
+        e.stopPropagation();
+        shareSel.value = id;
+        window.scrollTo({ top: 0, behavior: "smooth" });
+        const bar = document.getElementById("sharebar");
+        bar.classList.add("flash"); setTimeout(() => bar.classList.remove("flash"), 1200);
+      };
       t.querySelector(".x").onclick = (e) => { e.stopPropagation(); slots[i] = null; store(); render(); };
     } else {
       t.className = "tile empty";
@@ -124,8 +156,60 @@ function render(){
     wall.appendChild(t);
   });
   document.getElementById("count").textContent = filled + " / " + TOTAL;
+  refreshShareList();
   fetchStats(false);
 }
+
+// ---------- Share bar ----------
+const shareSel = document.getElementById("shareWhat");
+function refreshShareList(){
+  const prev = shareSel.value;
+  const seen = new Set();
+  let html = '<option value="wall">This wall page</option>';
+  slots.forEach((id, i) => {
+    if (!id || seen.has(id)) return;
+    seen.add(id);
+    const label = (stats[id] && stats[id].title) ? stats[id].title : ("Video #" + (i + 1) + " (" + id + ")");
+    html += '<option value="' + id + '">' + label.replace(/</g, "&lt;") + '</option>';
+  });
+  shareSel.innerHTML = html;
+  shareSel.value = [...shareSel.options].some(o => o.value === prev) ? prev : "wall";
+}
+function shareTarget(){
+  const v = shareSel.value;
+  if (v === "wall") {
+    if (location.protocol === "file:") return { url: "", text: "" };
+    return { url: location.href.split("#")[0], text: "Check out my YouTube watch wall" };
+  }
+  return { url: "https://youtu.be/" + v, text: (stats[v] && stats[v].title) || "Watch this video" };
+}
+function openShare(u){ window.open(u, "_blank", "noopener,noreferrer,width=640,height=560"); }
+async function copyText(t){
+  try { await navigator.clipboard.writeText(t); return true; }
+  catch (e) {
+    const ta = document.createElement("textarea"); ta.value = t; document.body.appendChild(ta); ta.select();
+    let ok = false; try { ok = document.execCommand("copy"); } catch (_) {}
+    ta.remove(); return ok;
+  }
+}
+document.getElementById("sharebar").addEventListener("click", async (e) => {
+  const b = e.target.closest("[data-s]"); if (!b) return;
+  const { url, text } = shareTarget();
+  if (!url) { say("Host this page on a website first, then you can share the wall page. Pick a single video to share its link now."); return; }
+  const U = encodeURIComponent(url), T = encodeURIComponent(text);
+  switch (b.dataset.s) {
+    case "wa": openShare("https://wa.me/?text=" + encodeURIComponent(text + " " + url)); break;
+    case "x":  openShare("https://twitter.com/intent/tweet?text=" + T + "&url=" + U); break;
+    case "fb": openShare("https://www.facebook.com/sharer/sharer.php?u=" + U); break;
+    case "tg": openShare("https://t.me/share/url?url=" + U + "&text=" + T); break;
+    case "cp": say((await copyText(url)) ? "Link copied: " + url : "Couldn't copy. Copy it manually: " + url); break;
+    case "nt":
+      if (navigator.share) { try { await navigator.share({ title: text, text, url }); } catch (_) {} }
+      else say((await copyText(url)) ? "Sharing isn't supported here, link copied instead." : "Sharing isn't supported in this browser.");
+      break;
+  }
+});
+if (!navigator.share) document.getElementById("nativeShare").style.display = "none";
 
 // ---------- View counts (YouTube Data API v3) ----------
 const API_KEY_STORE = "watchwall.apikey";
@@ -158,14 +242,52 @@ async function fetchStats(force){
       const data = await res.json();
       if (data.error) { say("API error: " + (data.error.message || data.error.code)); break; }
       (data.items || []).forEach(v => {
-        stats[v.id] = { views: v.statistics && v.statistics.viewCount != null ? Number(v.statistics.viewCount) : null, title: v.snippet && v.snippet.title };
+        stats[v.id] = { views: v.statistics && v.statistics.viewCount != null ? Number(v.statistics.viewCount) : null, title: v.snippet && v.snippet.title, channelId: v.snippet && v.snippet.channelId };
       });
+      // If no channel was set yet, use the channel of the first video on the wall
+      if (!getChannel()) {
+        const first = slots.find(Boolean);
+        if (first && stats[first] && stats[first].channelId) { saveChannel(stats[first].channelId); say("Subscribe button linked to the channel of your first video."); }
+      }
     }
     paintViews();
+    refreshShareList();
   } catch (e) {
     say("Couldn't reach the YouTube API. Check your connection and key.");
   } finally { fetching = false; }
 }
+// ---------- Subscribe button ----------
+const CH_STORE = "watchwall.channel";
+function getChannel(){ try { return localStorage.getItem(CH_STORE) || ""; } catch(e){ return ""; } }
+function saveChannel(v){ try { v ? localStorage.setItem(CH_STORE, v) : localStorage.removeItem(CH_STORE); } catch(e){} }
+// Accepts: channel URL, @handle, or a UC... channel ID. Returns a clean channel URL or "".
+function channelUrl(raw){
+  raw = (raw || "").trim();
+  if (!raw) return "";
+  if (/^UC[\w-]{22}$/.test(raw)) return "https://www.youtube.com/channel/" + raw;
+  if (/^@[\w.-]+$/.test(raw)) return "https://www.youtube.com/" + raw;
+  const m = raw.match(/youtube\.com\/(channel\/UC[\w-]{22}|@[\w.-]+|c\/[\w.-]+|user\/[\w.-]+)/i);
+  return m ? "https://www.youtube.com/" + m[1] : "";
+}
+document.getElementById("setChannel").onclick = () => {
+  const v = prompt("Paste your channel link, @handle or channel ID (leave empty to remove):", getChannel());
+  if (v === null) return;
+  if (!v.trim()) { saveChannel(""); say("Channel removed."); return; }
+  const u = channelUrl(v);
+  if (!u) { say("That doesn't look like a YouTube channel link, @handle or ID."); return; }
+  saveChannel(u); say("Channel saved.");
+};
+document.getElementById("subscribe").onclick = () => {
+  let u = channelUrl(getChannel());
+  if (!u) {
+    const v = prompt("Paste your channel link, @handle or channel ID:");
+    u = channelUrl(v); if (!u) { say("Set your channel first (Set channel button)."); return; }
+    saveChannel(u);
+  }
+  // sub_confirmation=1 opens the channel with the subscribe confirmation popup
+  window.open(u + "?sub_confirmation=1", "_blank", "noopener");
+};
+
 document.getElementById("apiKey").onclick = () => {
   const k = prompt("Paste your YouTube Data API v3 key (leave empty to remove it):", getKey());
   if (k === null) return;
